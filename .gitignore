@@ -39,3 +39,5 @@ htmlcov/
 *.gguf
 *.part
 CHANGELOG.md
+**/.workbuddy/
+.workbuddy/

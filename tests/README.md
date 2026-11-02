@@ -27,6 +27,7 @@ Remote 测试包含模拟 macOS 启动器、临时 Git 仓库、本地回环 HTT
 - macOS 原生 Bash 3.2 的真实安装与权限、签名、DMG 流程。
 - 上游下载可用性、模型大文件断点续传、磁盘空间与文件系统行为。
 - 模型首次加载、实际 API 推理、音视频质量与性能。
+- AIPerf 并发压测的真实指标：离线回归只验证参数校验、命令拼装、产物解析与报告生成，不联网安装 aiperf，也不连接真实服务。
 - 固定版本 Remotion 工程与真实渲染器的兼容性。
 
 `.github/workflows/checks.yml` 为 Ubuntu/macOS 执行同一完整测试命令。GitHub 准备运行环境时可能下载 Python/Node；测试本身不安装应用或下载模型。该工作流需将仓库推送至 GitHub 并启用 Actions 后才会运行，随包提供配置不代表托管 CI 已通过。

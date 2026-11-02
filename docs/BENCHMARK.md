@@ -1,6 +1,6 @@
 # Benchmark
 
-菜单第二项 [MLX benchmark](MLX_BENCHMARK.md) 补足 50K、100K、200K 高上下文测试。以下说明针对第一项 Llama benchmark；MLX-Serve 的 PP 计时不准，勿将其结果视为纯预填充性能。
+菜单第二项 [MLX benchmark](MLX_BENCHMARK.md) 补足 50K、100K、200K 高上下文测试，第三项 [AIPerf 并发压测](AIPERF_BENCHMARK.md) 测量多并发下的延迟、吞吐与错误率。以下说明针对第一项 Llama benchmark；MLX-Serve 的 PP 计时不准，勿将其结果视为纯预填充性能。三项的语料、采样与计时口径不同，结果不可直接互比。
 
 主菜单第 5 项 **Benchmark → Llama benchmark**，也可运行 `bash start.sh benchmark`。测试所选无认证 OpenAI 兼容接口，不安装、启动或停止推理服务。先准备 Python 3.10+ 和 uvx；缺失时提示并返回，不自动安装基础环境。
 

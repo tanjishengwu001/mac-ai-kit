@@ -143,6 +143,7 @@ Mac AI Kit · 本地 AI 创作工坊
                       logs --service audio --follow（Ctrl+C 仅退出查看）
   benchmark           Llama benchmark（通用接口测试）
   mlx-benchmark       MLX-Serve 长上下文 benchmark（0 / 50K / 100K / 200K）
+  aiperf-benchmark    AIPerf 多并发压力测试（延迟、吞吐与错误率）
   remote              配置 Remotion Remote（仅写配置，不启动服务）
                       可选：--project 已有工程目录
   merge-h3            自动校验并合并当前模型目录的 H3 共享权重
@@ -224,6 +225,11 @@ mlx_benchmark() {
   find_python || { say 'Benchmark 需要 Python 3.10+，请先准备基础环境；不会自动安装。' >&2; return 1; }
   "$PYTHON" "$SCRIPTS/mlx_benchmark.py" --models-dir "$MODEL_DIR" "$@"
 }
+aiperf_benchmark() {
+  model_directory_for_args "$@" || return $?
+  find_python || { say 'Benchmark 需要 Python 3.10+，请先准备基础环境；不会自动安装。' >&2; return 1; }
+  "$PYTHON" "$SCRIPTS/aiperf_benchmark.py" --models-dir "$MODEL_DIR" "$@"
+}
 services() {
   find_python || { say '服务管理需要 Python 3.10+，请先准备基础环境；不会自动安装。' >&2; return 1; }
   "$PYTHON" "$SCRIPTS/native_services.py" --models-dir "$MODEL_DIR" "$@"
@@ -253,6 +259,7 @@ run_task() {
     services) services "$@"; return $? ;;
     benchmark) benchmark "$@"; return $? ;;
     mlx-benchmark) mlx_benchmark "$@"; return $? ;;
+    aiperf-benchmark) aiperf_benchmark "$@"; return $? ;;
     remote) configure_remote "$@"; return $? ;;
     merge-h3) merge_h3 "$@"; return $? ;;
     check-tools) check_tools "$@"; return $? ;; -h|--help) usage; return 0 ;; script-help)
@@ -260,6 +267,7 @@ run_task() {
     case "$1" in
       benchmark) benchmark --help ;;
       mlx-benchmark) mlx_benchmark --help ;;
+      aiperf-benchmark) aiperf_benchmark --help ;;
       remote) configure_remote --help ;;
       env) /bin/bash "$SCRIPTS/setup_mac_environment.sh" --help ;;
       capabilities) /bin/bash "$SCRIPTS/setup_ai_capabilities.sh" --help ;;
@@ -447,12 +455,14 @@ benchmark_menu() {
     UI_BACK_LABEL=返回
     ui_select 'Benchmark' \
       'Llama benchmark' '0、50K、100K、200K 上下文吞吐测试；PP 计时不兼容 MLX-Serve、oMLX 等框架的空 role 消息。' \
-      'MLX-Serve 长上下文 benchmark' '0、50K、100K、200K 四档测试'
+      'MLX-Serve 长上下文 benchmark' '0、50K、100K、200K 四档测试' \
+      'AIPerf 并发压力测试' '多并发下的首 token 延迟、吞吐与错误率；与长上下文测试口径不同，不可直接互比。'
     case "$UI_CHOICE" in
       0|q) return "$code" ;;
       h) usage; ui_pause; continue ;;
       1) benchmark ;;
       2) mlx_benchmark ;;
+      3) aiperf_benchmark ;;
       *) say '请选择菜单中的编号。'; ui_pause; continue ;;
     esac
     code=$?; menu_result "$code"

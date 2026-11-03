@@ -27,7 +27,7 @@ from benchmark_discovery import discover, choose, resolve_tokenizer, default_mod
 PACKAGE = 'aiperf==0.13.0'
 DEFAULT_URL = 'http://127.0.0.1:11234/v1'
 DEFAULT_CONCURRENCY = (1, 4, 8)
-DEFAULT_REQUEST_COUNT = 40
+DEFAULT_REQUEST_COUNT = 16
 MAX_REPORT_BYTES = 20_000_000
 # 摘要列：metric tag -> (标题, 单位)
 SUMMARY_METRICS = (

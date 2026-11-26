@@ -24,7 +24,7 @@ bash start.sh
 
 ## 文档
 
-[安装](docs/INSTALL.md) · [模型](docs/MODELS.md) · [共享目录](docs/SHARED_MODELS.md) · [API 说明](docs/API.md) · [独立服务管理](docs/NATIVE_SERVICES.md) · [llama-swap（可选）](docs/services.md) · [Benchmark](docs/BENCHMARK.md) · [MLX 高上下文测试](docs/MLX_BENCHMARK.md) · [AIPerf 并发压测](docs/AIPERF_BENCHMARK.md) · [Remote](docs/REMOTE.md) · [外置盘恢复](docs/DOWNLOAD_RECOVERY.md)
+[安装](docs/INSTALL.md) · [模型](docs/MODELS.md) · [共享目录](docs/SHARED_MODELS.md) · [API 说明](docs/API.md) · [独立服务管理](docs/NATIVE_SERVICES.md) · [MLX 视频队列](docs/MLX_VIDEO_QUEUE.md) · [llama-swap（可选）](docs/services.md) · [Benchmark](docs/BENCHMARK.md) · [MLX 高上下文测试](docs/MLX_BENCHMARK.md) · [AIPerf 并发压测](docs/AIPERF_BENCHMARK.md) · [Remote](docs/REMOTE.md) · [外置盘恢复](docs/DOWNLOAD_RECOVERY.md)
 
 ## 测试与贡献
 

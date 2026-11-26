@@ -142,6 +142,7 @@ Mac AI Kit · 本地 AI 创作工坊
                       status --json（只读快照，unknown 不是空闲）
                       logs --service audio --follow（Ctrl+C 仅退出查看）
   benchmark           Llama benchmark（通用接口测试）
+  mlx-video-queue     MiniMax H3 常驻视频队列（start / stop / status / run）
   mlx-benchmark       MLX-Serve 长上下文 benchmark（0 / 50K / 100K / 200K）
   aiperf-benchmark    AIPerf 多并发压力测试（延迟、吞吐与错误率）
   remote              配置 Remotion Remote（仅写配置，不启动服务）
@@ -230,6 +231,10 @@ aiperf_benchmark() {
   find_python || { say 'Benchmark 需要 Python 3.10+，请先准备基础环境；不会自动安装。' >&2; return 1; }
   "$PYTHON" "$SCRIPTS/aiperf_benchmark.py" --models-dir "$MODEL_DIR" "$@"
 }
+mlx_video_queue() {
+  find_python || { say '视频队列需要 Python 3.10+；不会自动安装。' >&2; return 1; }
+  exec "$PYTHON" "$SCRIPTS/mlx_video_queue.py" "$@"
+}
 services() {
   find_python || { say '服务管理需要 Python 3.10+，请先准备基础环境；不会自动安装。' >&2; return 1; }
   "$PYTHON" "$SCRIPTS/native_services.py" --models-dir "$MODEL_DIR" "$@"
@@ -256,6 +261,7 @@ run_task() {
       model_directory_for_args "$@" || return $?
       find_python || { say '未找到 Python 3.10+，无法检查模型；不会自动安装。' >&2; return 1; }
       "$PYTHON" "$SCRIPTS/model_inventory.py" --models-dir "$MODEL_DIR" "$@"; return $? ;;
+    mlx-video-queue) mlx_video_queue "$@"; return $? ;;
     services) services "$@"; return $? ;;
     benchmark) benchmark "$@"; return $? ;;
     mlx-benchmark) mlx_benchmark "$@"; return $? ;;

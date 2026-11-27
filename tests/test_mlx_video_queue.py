@@ -4,6 +4,7 @@ import io
 import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import tempfile
 import threading
@@ -41,10 +42,38 @@ class VideoQueueTests(unittest.TestCase):
     def test_chunked_sse_and_audio(self):
         payload, rgb, info = video_event()
         out = io.BytesIO()
-        data, size = queue.receive_rgb(ByteStream(payload), out)
+        progress = []
+        data, size = queue.receive_rgb(ByteStream(payload), out, on_progress=progress.append)
         self.assertEqual(size, len(rgb))
         self.assertEqual(out.getvalue(), rgb)
         self.assertEqual(data, dict(info, data=''))
+        self.assertEqual(progress, [{'type': 'progress', 'step': 1}])
+
+    def test_progress_persists_for_running_job_and_ignores_media(self):
+        with tempfile.TemporaryDirectory() as d:
+            video_queue = queue.VideoQueue(SimpleNamespace(state=Path(d), max_jobs=2, max_retained=3))
+            video_queue.recover()
+            job_id = video_queue.submit({'model': 'm1'})['id']
+            self.assertIsNone(video_queue.get(job_id)['progress'])
+            video_queue.earliest()
+            video_queue.update_progress(job_id, {'type': 'progress', 'step': 3, 'total_steps': 20, 'data': 'SECRET'})
+            status = video_queue.get(job_id)
+            self.assertEqual(status['progress']['step'], 3)
+            self.assertEqual(status['progress']['total_steps'], 20)
+            self.assertNotIn('data', status['progress'])
+            self.assertIsInstance(status['progress']['observed_at'], float)
+
+    def test_progress_migrates_existing_queue_database(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            with sqlite3.connect(root / 'jobs.sqlite3') as db:
+                db.execute('''CREATE TABLE jobs (seq INTEGER PRIMARY KEY, id TEXT UNIQUE,
+                           request TEXT, state TEXT, created REAL, updated REAL, error TEXT,
+                           encoder TEXT, output_path TEXT)''')
+            video_queue = queue.VideoQueue(SimpleNamespace(state=root, max_jobs=2, max_retained=3))
+            video_queue.recover()
+            job_id = video_queue.submit({'model': 'm1'})['id']
+            self.assertIsNone(video_queue.get(job_id)['progress'])
 
     def test_truncated_sse_and_typed_error(self):
         payload, _, _ = video_event()
@@ -164,7 +193,7 @@ class VideoQueueTests(unittest.TestCase):
             token.write_text('test-token')
             child = subprocess.Popen(
                 ['bash', str(ROOT / 'start.sh'), 'mlx-video-queue', 'run', '--state', str(home / 'state'),
-                 '--output-dir', 'dated-exports', '--port', str(port), '--upstream-port', str(server.server_port), '--upstream-key-file', str(token)],
+                 '--output-dir', 'dated-exports', '--host', '127.0.0.1', '--port', str(port), '--upstream-port', str(server.server_port), '--upstream-key-file', str(token)],
                 cwd=home, env=dict(os.environ, HOME=tmp), stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             client = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -206,7 +235,7 @@ class VideoQueueTests(unittest.TestCase):
                         continue
                     self.assertEqual(job['status'], 'succeeded', job)
                     archived = Path(job['output_path'])
-                    self.assertEqual(archived.parents[2], home / 'dated-exports')
+                    self.assertEqual(archived.parents[2].resolve(), (home / 'dated-exports').resolve())
                     self.assertRegex(str(archived.relative_to(archived.parents[2])),
                                      rf'^\d{{4}}-\d{{2}}-\d{{2}}/\d{{2}}/\d{{6}}\.\d{{6}}-{job["id"]}\.mp4$')
                     result = home / f'{i}.mp4'

@@ -7,6 +7,7 @@ from datetime import datetime
 import fcntl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
+import math
 import os
 from pathlib import Path
 import plistlib
@@ -49,7 +50,7 @@ def pack_request(body):
     if body.get('last_frame_image') and not body.get('first_frame_image'):
         raise QueueError('提供尾帧时也要提供首帧')
     return dict(body, stream=True, preview=False)
-def receive_rgb(stream, destination):
+def receive_rgb(stream, destination, on_progress=None):
     """按块解开 SSE complete 行中的 RGB；元数据及音轨单独限长。"""
     buf = bytearray()
     head = b''
@@ -124,6 +125,8 @@ def receive_rgb(stream, destination):
                         continue
             if sep:
                 event = decode(head + bytes(buf)) if phase == 'tail' else decode(bytes(buf))
+                if event and event.get('type') == 'progress' and on_progress:
+                    on_progress(event)
                 if event and event.get('type') == 'complete':
                     if phase != 'tail':
                         raise QueueError('MLX complete 未携带 RGB 字段')
@@ -206,6 +209,8 @@ class VideoQueue:
             db.execute('''CREATE TABLE IF NOT EXISTS jobs (
                 seq INTEGER PRIMARY KEY, id TEXT UNIQUE, request TEXT, state TEXT,
                 created REAL, updated REAL, error TEXT, encoder TEXT, output_path TEXT)''')
+            if 'progress' not in {row['name'] for row in db.execute('PRAGMA table_info(jobs)')}:
+                db.execute('ALTER TABLE jobs ADD COLUMN progress TEXT')
             # 原子发布后的 MP4 是完整的，可恢复，不重复消耗推理。
             for job in db.execute("SELECT id, output_path FROM jobs WHERE state='running'").fetchall():
                 output = Path(job['output_path']) if job['output_path'] else None
@@ -237,11 +242,13 @@ class VideoQueue:
         return self.get(job_id)
     def get(self, job_id):
         with closing(self.db()) as db:
-            row = db.execute('SELECT id,state AS status,created,updated,error,encoder,output_path FROM jobs WHERE id=?',
+            row = db.execute('SELECT id,state AS status,created,updated,error,encoder,output_path,progress FROM jobs WHERE id=?',
                              (job_id,)).fetchone()
         if not row:
             return None
         info = dict(row)
+        if info['progress']:
+            info['progress'] = json.loads(info['progress'])
         path = f'/v1/video/jobs/{job_id}'
         info['status_url'] = path
         if info['status'] == 'succeeded':
@@ -270,6 +277,18 @@ class VideoQueue:
                 db.execute("UPDATE jobs SET state='running', updated=? WHERE id=?", (time.time(), job['id']))
             db.commit()
             return job
+    def update_progress(self, job_id, event):
+        # Keep only bounded scalar progress fields, never media payloads.
+        allowed = ('step', 'total_steps', 'total', 'progress', 'percent', 'percentage', 'phase', 'stage')
+        clean = {key: event[key] for key in allowed if key in event and
+                 ((type(event[key]) in (int, float) and math.isfinite(event[key])) or
+                  (isinstance(event[key], str) and len(event[key]) <= 100))}
+        if not clean:
+            return
+        clean['observed_at'] = time.time()
+        with closing(self.db()) as db:
+            db.execute("UPDATE jobs SET progress=?, updated=? WHERE id=? AND state='running'",
+                       (json.dumps(clean, ensure_ascii=False, allow_nan=False), time.time(), job_id))
     def work(self):
         while not self.stop.is_set():
             self.wake.clear()
@@ -322,7 +341,16 @@ class VideoQueue:
                 with self.opener.open(req, timeout=self.args.timeout) as response, (folder / 'video.rgb').open('wb') as raw:
                     if response.headers.get_content_type() != 'text/event-stream':
                         raise QueueError('MLX Serve 未返回预期的 SSE 视频流')
-                    meta, size = receive_rgb(response, raw)
+                    last_update = [0.0]
+                    def on_progress(event):
+                        now = time.monotonic()
+                        if now - last_update[0] >= 2:
+                            try:
+                                self.update_progress(job['id'], event)
+                                last_update[0] = now
+                            except sqlite3.Error:
+                                pass
+                    meta, size = receive_rgb(response, raw, on_progress=on_progress)
             except urllib.error.HTTPError as e:
                 with e:
                     detail = ''

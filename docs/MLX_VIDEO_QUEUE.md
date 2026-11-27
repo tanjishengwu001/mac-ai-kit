@@ -8,7 +8,11 @@ bash start.sh mlx-video-queue status
 bash start.sh mlx-video-queue stop
 ```
 
-需要 Python 3.10+、已安装的 FFmpeg、macOS 登录会话。也可以用 `run` 在前台运行。后台由当前用户的 launchd 管理，退出终端后继续运行，不设置登录自启。队列只监听 `127.0.0.1:11235`，默认将视频任务转发给 `127.0.0.1:11234`。使用远程 Agent 时用自己的 SSH 隧道，不要将这个没有客户端 API 密钥的服务直接暴露给局域网或公网。
+也可从 `bash start.sh` → 第 6 项「服务管理」单独启动、查看状态或日志；“启动全部”“停止全部”“查看状态”均包含此队列。等价命令为 `bash start.sh services start --service mlx-video-queue` 与 `bash start.sh services status --service mlx-video-queue`；单独停止使用 `bash start.sh services stop --service mlx-video-queue`。两个入口复用同一默认状态目录和 launchd 标签，不创建第二个实例；菜单不控制 MLX-Serve 本体。自定义 `--state` 的实例仍用本页原命令管理。
+
+需要 Python 3.10+、已安装的 FFmpeg、macOS 登录会话。也可以用 `run` 在前台运行。后台由当前用户的 launchd 管理，退出终端后继续运行，不设置登录自启。队列默认监听 `0.0.0.0:11235`，将视频任务转发给 `127.0.0.1:11234`。此接口没有客户端认证，仅限可信局域网或 VPN，切勿映射公网；若只需本机访问，启动时显式传入 `--host 127.0.0.1`，远程 Agent 可配合自己的 SSH 隧道。
+
+`status` 显示 PID、实际保存的监听/上游端口、队列 API 健康与日志目录；加 `--json` 可输出只读快照。只查询 launchd 与 `/healthz`，不读取任务数据库、不发推理请求、不修改配置。健康不代表空闲；查询失败保留未知状态并返回非零。
 
 用 `--port`、`--upstream-port`、`--ffmpeg` 可调整端口和程序路径。如果 MLX Serve 要求认证，加 `--upstream-key-file /绝对路径/密钥文件`，在该私有文件内放一行 Bearer token；不要把 token 放在命令行或提交到 Git。修改后台配置先 stop 再 start。默认状态目录为 `~/Library/Application Support/Mac AI Kit/mlx-video-queue`，包含 SQLite、转码临时文件以及日志。
 

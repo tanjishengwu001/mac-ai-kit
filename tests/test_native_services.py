@@ -53,6 +53,7 @@ class NativeServiceTests(unittest.TestCase):
             patch.object(self.manager, 'load_default_sd'),
             patch.object(self.manager, 'wait_ready'),
             patch.object(self.manager, 'refresh_inventory'),
+            patch.object(self.manager, 'queue_action', create=True),
             patch.object(ns.subprocess, 'run', side_effect=AssertionError('unexpected process execution')),
             patch.object(ns.http.client, 'HTTPConnection', side_effect=AssertionError('unexpected HTTP')),
             patch.object(ns, 'available_port', return_value=None),
@@ -328,13 +329,97 @@ class NativeServiceTests(unittest.TestCase):
         self.assertIn('audio.cpp · 转写／YuE2：未启动', text)
         self.assertNotIn('sd-qwen：', text)
 
-    def test_all_start_has_only_native_services(self):
+    def test_all_start_includes_existing_video_queue_without_managing_mlx_app(self):
         self.start_mocks(); self.manager.start()
+        self.manager.queue_action.assert_called_once_with('start')
         calls = self.manager.ctl.call_args_list
         self.assertEqual(len(calls), 2)
         self.assertEqual(set(ns.SPECS), {'sd-qwen', 'audio'})
         self.assertTrue(all(c.args[0] == 'bootstrap' for c in calls))
         self.assertFalse(any('llama' in str(c) or 'mlx' in str(c).lower() for c in calls))
+
+    def test_queue_single_start_does_not_scan_models_or_start_native_engines(self):
+        self.manager.models = self.home / 'missing-models'
+        with patch.object(self.manager, '_start') as native:
+            self.manager.start('mlx-video-queue')
+        self.manager.queue_action.assert_called_once_with('start')
+        self.manager.refresh_inventory.assert_not_called()
+        native.assert_not_called()
+        self.assertFalse(self.manager.models.exists())
+
+    def test_queue_cli_and_menu_have_independent_start_and_status(self):
+        for action in ('start', 'status', 'stop'):
+            with self.subTest(action=action), patch.object(ns, 'NativeManager', return_value=self.manager):
+                self.manager.queue_action.reset_mock()
+                self.assertEqual(ns.main([action, '--service', 'mlx-video-queue']), 0)
+                self.manager.queue_action.assert_called_once_with(action)
+        for choice, action in ((b'8', 'start'), (b'9', 'status')):
+            with self.subTest(choice=choice), patch.object(ns.os, 'read', side_effect=[choice, b'0']), patch.object(ns.subprocess, 'run', return_value=Mock(returncode=0)) as run, patch('service_manager.pause_menu'):
+                self.manager.queue_action.reset_mock()
+                ns.menu(self.manager)
+                self.manager.queue_action.assert_called_once_with(action)
+                self.assertIn('11235', run.call_args_list[0].args[0][2])
+
+    def test_queue_failure_does_not_prevent_other_services_starting(self):
+        self.manager.queue_action.side_effect = ns.ServiceError('队列失败')
+        with patch.object(self.manager, '_start') as native, patch.object(self.manager, 'status'), patch.object(self.manager, 'write_api'):
+            with self.assertRaisesRegex(ns.ServiceError, '队列失败'):
+                self.manager.start()
+        native.assert_called_once_with('all')
+
+    def test_stop_all_attempts_queue_and_native_even_if_queue_fails(self):
+        self.manager.queue_action.side_effect = ns.ServiceError('队列失败')
+        with patch.object(self.manager, 'state', return_value=self.state()) as state:
+            with self.assertRaises(ns.ServiceError):
+                self.manager.stop()
+        self.manager.queue_action.assert_called_once_with('stop')
+        self.assertEqual([c.args[0] for c in state.call_args_list], list(ns.SPECS))
+
+    def test_single_native_start_never_touches_queue(self):
+        self.start_mocks()
+        self.manager.start('audio')
+        self.manager.queue_action.assert_not_called()
+
+    def test_queue_logs_reuse_original_directory(self):
+        with patch.object(ns.Path, 'home', return_value=self.home):
+            folder = self.home / 'Library/Application Support/Mac AI Kit/mlx-video-queue'
+            folder.mkdir(parents=True)
+            (folder / 'stdout.log').write_text('queue log\n')
+            self.manager.logs('mlx-video-queue')
+        self.assertIn('queue log', self.out.getvalue())
+
+    def test_queue_adapter_reuses_cli_and_propagates_failure(self):
+        with patch.object(ns.subprocess, 'run', return_value=Mock(returncode=1, stdout='', stderr='occupied')) as run:
+            with self.assertRaisesRegex(ns.ServiceError, 'occupied'):
+                ns.NativeManager.queue_action(self.manager, 'start')
+        self.assertEqual(run.call_args.args[0], [ns.sys.executable, str(ROOT / 'scripts/mlx_video_queue.py'), 'start'])
+
+    def test_queue_json_is_in_all_and_individual_status(self):
+        row = {'service': 'mlx-video-queue', 'api_healthy': True, 'workload': 'unknown'}
+        self.manager.queue_action.return_value = row
+        with patch.object(self.manager, 'state', return_value=self.state()):
+            for selection, expected in [('all', ['sd-qwen', 'audio', 'mlx-video-queue']), ('mlx-video-queue', ['mlx-video-queue'])]:
+                with self.subTest(selection=selection):
+                    result = self.manager.status_json(selection)
+                    self.assertEqual([r['service'] for r in result['services']], expected)
+                    self.assertEqual(result['services'][-1], row)
+
+    def test_queue_json_failure_keeps_native_results_and_returns_nonzero(self):
+        self.manager.queue_action.side_effect = subprocess.TimeoutExpired('queue status', 60)
+        with patch.object(ns, 'NativeManager', return_value=self.manager), patch.object(self.manager, 'state', return_value=self.state()):
+            self.assertEqual(ns.main(['status', '--json']), 2)
+        rows = json.loads(self.out.getvalue())['services']
+        self.assertEqual(len(rows), 3)
+        self.assertIn('error', rows[-1])
+        self.assertIsNone(rows[-1]['loaded'])
+
+    def test_all_human_status_keeps_native_results_when_queue_query_fails(self):
+        self.manager.queue_action.side_effect = ns.ServiceError('队列状态未知')
+        with patch.object(self.manager, 'state', return_value=self.state()):
+            with self.assertRaises(ns.ServiceError):
+                self.manager.status()
+        self.assertIn('audio.cpp', self.out.getvalue())
+        self.assertIn('SD.cpp', self.out.getvalue())
 
     def test_loaded_foreign_agent_start_not_replaced(self):
         self.start_mocks(); self.manager.state.return_value = self.state(True, False, 9)

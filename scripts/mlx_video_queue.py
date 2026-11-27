@@ -6,6 +6,7 @@ from contextlib import closing
 from datetime import datetime
 import fcntl
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import http.client
 import json
 import math
 import os
@@ -593,6 +594,73 @@ def launch(args):
             pass
         time.sleep(.2)
     raise QueueError('已加载但未确认健康；请查看状态目录的 stderr.log')
+def status_snapshot(args):
+    """只读观察 launchd 和队列健康；不打开数据库、不推断上游模型或空闲。"""
+    row = dict(service='mlx-video-queue', title='MLX-Serve 视频队列', configured=False,
+               loaded=None, owned=None, pid=None, stopping=None, api_healthy=None,
+               model_residency='unknown', workload='unknown', stop_safety='unknown',
+               atomic_shutdown_barrier=False, host=args.host, port=args.port,
+               upstream_port=args.upstream_port, state_dir=str(args.state))
+    try:
+        if sys.platform != 'darwin':
+            raise QueueError('非 macOS，未查询队列；不能据此判断已停止')
+        target = f'gui/{os.getuid()}/{LABEL}'
+        state = subprocess.run(['/bin/launchctl', 'print', target], capture_output=True, text=True, timeout=15)
+        if state.returncode:
+            missing = re.search(r'Could not find service\s+"' + re.escape(LABEL) + r'"\s+in domain', state.stderr + state.stdout)
+            if state.returncode != 113 or not missing:
+                raise QueueError('launchd 查询失败，队列状态未知')
+            row.update(loaded=False, owned=False, detail='队列未加载')
+        else:
+            pid = re.search(r'^\s*pid = (\d+)$', state.stdout, re.M)
+            row.update(loaded=True, owned=False, pid=int(pid[1]) if pid else None,
+                       detail='进程运行' if pid else '已注册，进程未运行')
+        path = args.state / f'{LABEL}.plist'
+        if row['loaded']:
+            source = re.search(r'^\s*path = (.+)$', state.stdout, re.M)
+            if not source or Path(source[1].strip()).resolve() != path:
+                raise QueueError('同名 launchd 服务来自其他状态目录，请用原 --state 管理')
+        if row['loaded'] or path.exists() or path.is_symlink():
+            if path.is_symlink():
+                raise QueueError('队列启动文件为符号链接，未读取')
+            config = plistlib.loads(path.read_bytes())
+            command = config.get('ProgramArguments', [])
+            if (config.get('Label') != LABEL or not isinstance(command, list)
+                    or not all(isinstance(x, str) for x in command) or len(command) < 5
+                    or command[1:3] != [str(args.state / 'mlx_video_queue.py'), 'run']
+                    or len(command[3:]) % 2):
+                raise QueueError('队列启动文件归属或结构不符')
+            options = dict(zip(command[3::2], command[4::2]))
+            if options.get('--state') != str(args.state):
+                raise QueueError('队列状态目录归属不符')
+            host = options.get('--host', '0.0.0.0')
+            port = int(options.get('--port', 11235))
+            upstream = int(options.get('--upstream-port', 11234))
+            if not (1 <= port <= 65535 and 1 <= upstream <= 65535):
+                raise QueueError('队列配置端口无效')
+            row.update(configured=True, owned=bool(row['loaded']), host=host, port=port, upstream_port=upstream)
+        if row['owned'] and row['pid']:
+            row['api_healthy'] = False
+            conn = None
+            try:
+                host = '127.0.0.1' if row['host'] in ('0.0.0.0', '') else row['host']
+                conn = http.client.HTTPConnection(host, row['port'], timeout=1)
+                conn.request('GET', '/healthz')
+                response = conn.getresponse()
+                body = json.loads(response.read(65536))
+                row['api_healthy'] = (response.status == 200
+                    and response.getheader('X-Mac-AI-Kit-Service') == LABEL
+                    and isinstance(body, dict) and body.get('worker_alive') is True)
+            except (OSError, ValueError, http.client.HTTPException):
+                pass
+            finally:
+                if conn:
+                    conn.close()
+    except (QueueError, OSError, ValueError, TypeError, subprocess.SubprocessError) as error:
+        row['error'] = str(error)
+    return row
+
+
 def main(argv=None):
     os.umask(0o077)
     p = argparse.ArgumentParser(description='MLX Serve 常驻视频队列及 MP4 回传')
@@ -609,6 +677,7 @@ def main(argv=None):
     p.add_argument('--bitrate', default='8M', help='VideoToolbox 目标码率')
     p.add_argument('--max-jobs', type=int, default=32, help='最大活动任务数')
     p.add_argument('--max-retained', type=int, default=256, help='所有任务记录数量上限')
+    p.add_argument('--json', action='store_true', help='仅 status：输出只读 JSON 状态')
     args = p.parse_args(argv)
     if not (1 <= args.port <= 65535 and 1 <= args.upstream_port <= 65535 and args.timeout > 0
             and 0 < args.max_jobs <= args.max_retained and re.fullmatch(r'[1-9][0-9]*[kKmM]?', args.bitrate)):
@@ -618,9 +687,26 @@ def main(argv=None):
         args.output_dir = args.output_dir.expanduser().resolve()
     if args.upstream_key_file:
         args.upstream_key_file = args.upstream_key_file.expanduser().resolve()
+    if args.json and args.action != 'status':
+        print(json.dumps({'error': '--json 仅适用于 status，不执行启停'}, ensure_ascii=False))
+        return 2
+    if args.action == 'status':
+        row = status_snapshot(args)
+        if args.json:
+            print(json.dumps(row, ensure_ascii=False))
+        else:
+            detail = row.get('error') or ('API 健康' if row['api_healthy'] else
+                     '进程存在，API 尚未就绪' if row['pid'] else row.get('detail', '状态未知'))
+            print(f"MLX-Serve 视频队列：{detail} | PID {row['pid'] or '-'}")
+            print(f"  监听：{row['host']}:{row['port']} | 上游：127.0.0.1:{row['upstream_port']}（未探测模型）")
+            if row['api_healthy']:
+                host = '127.0.0.1' if row['host'] in ('0.0.0.0', '') else row['host']
+                print(f"  API：http://{host}:{row['port']}")
+            print(f"  日志：{args.state}")
+        return 2 if 'error' in row else 0
     try:
         (run if args.action == 'run' else launch)(args)
     except (QueueError, OSError, subprocess.SubprocessError, sqlite3.Error) as exc:
         p.exit(1, f'{exc}\n')
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

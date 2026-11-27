@@ -14,7 +14,7 @@ bash start.sh
 
 ## 六个入口
 
-1. **安装运行工具**：准备 Homebrew、FFmpeg、uv、fnm/Node 等基础工具，或选择 MLX-Serve、llama.cpp、llama-swap、sd.cpp、audio.cpp、Hermes。先展示计划，再确认安装；系统授权与可选组件另行提示。
+1. **安装运行工具**：准备 Homebrew、FFmpeg、uv、fnm/Node 等基础工具，或选择 MLX-Serve、llama.cpp、llama-swap、sd.cpp、audio.cpp、Hermes；另有 WeeToddCLI 完整 App 源码构建与配置入口。先展示计划，再确认安装；系统授权与可选组件另行提示。
 2. **管理本地模型**：选择、下载、查看模型，设置公共模型目录，检查 H3 共享文件。已有完整文件不重复下载。
 3. **配置 Remotion 远程渲染**：在指定的已有工程中保存配置；安装不会顺带启动渲染。
 4. **环境诊断与 API 说明**：检查工具状态，查看或更新模型目录下的 `API.md`。这是调用说明，不是新建 API 服务。
@@ -25,6 +25,9 @@ bash start.sh
 ## 文档
 
 [安装](docs/INSTALL.md) · [模型](docs/MODELS.md) · [共享目录](docs/SHARED_MODELS.md) · [API 说明](docs/API.md) · [独立服务管理](docs/NATIVE_SERVICES.md) · [MLX 视频队列](docs/MLX_VIDEO_QUEUE.md) · [llama-swap（可选）](docs/services.md) · [Benchmark](docs/BENCHMARK.md) · [MLX 高上下文测试](docs/MLX_BENCHMARK.md) · [AIPerf 并发压测](docs/AIPERF_BENCHMARK.md) · [Remote](docs/REMOTE.md) · [外置盘恢复](docs/DOWNLOAD_RECOVERY.md)
+
+WeeTodd 原生 H3 两阶段潜空间放大：[安装、CLI 使用与边界](docs/WEETODD_CLI.md)。
+`bash start.sh weetodd` 仅预览；安装不会下载权重或运行示例视频。
 
 ## 测试与贡献
 

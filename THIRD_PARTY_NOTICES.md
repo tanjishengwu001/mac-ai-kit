@@ -11,6 +11,7 @@
 下列来源与仓库中的安装器或文档一致；实际使用版本和校验值以对应脚本为准。使用或再分发时，请阅读该版本随附的 LICENSE、NOTICE 与依赖声明。
 
 - [MLX-Serve](https://github.com/ddalcu/mlx-serve)：App 及内置/独立 CLI。
+- [WeeTodd Studio](https://github.com/wee-todd/WeeTodd-Studio)：从固定提交构建完整 App、WeeToddCLI 及原生 workers，保留上游许可、依赖锁与包内 Notices；本仓库不捆绑其二进制或模型。H3 社区潜变量放大器等权重另受各自许可约束。
 - [llama.cpp](https://github.com/ggml-org/llama.cpp)：GGUF 推理后端。
 - [llama-swap](https://github.com/mostlygeek/llama-swap)：后端启停及代理。
 - [stable-diffusion.cpp](https://github.com/leejet/stable-diffusion.cpp)：图像与视频后端。

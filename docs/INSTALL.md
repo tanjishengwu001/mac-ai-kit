@@ -24,6 +24,23 @@
 
 外置盘必须先挂载。工具不为未挂载的盘创建假的 `/Volumes/...` 目录。普通新模型目录会在能力安装或实际下载时创建；能力安装先安全准备目录，再交给 GUI 设置。入口拒绝根目录、含 .. 或符号链接祖先的目录，预览不创建目录。
 
+## WeeToddCLI：完整 App 源码构建
+
+从主菜单「安装运行工具 → 安装 WeeToddCLI」进入，或运行：
+
+```bash
+bash start.sh weetodd preview
+bash start.sh weetodd install --xcode /Applications/Xcode.app
+bash start.sh weetodd doctor
+bash start.sh weetodd cli -- models --help
+```
+
+需要 Python 3.10+、原生 Apple Silicon、完整 Xcode 26+（包括 Metal Toolchain）和 FFmpeg/FFprobe。
+安装前会确认；非交互使用 `--yes`。已有完整 App 使用 `install --app '/实际路径/WeeTodd Studio.app'`。
+默认在 `~/AI/apps/weetodd-studio/` 保存固定提交源码与完整包，在 `~/AI/bin/weetodd` 写启动器；不拆出单个二进制、不覆盖已有不同文件、不更改系统 Xcode 选择。
+这是独立于 MLX-Serve 的原生 H3 路线；不配置模型、不启动应用或服务、不执行生成测试。
+完整参数、模型兼容性及两阶段潜空间放大步骤见 [WeeToddCLI](WEETODD_CLI.md)。
+
 ## MLX-Serve 仅安装桌面 App
 
 安装官方完整 App，保留已有应用；不安装、发现或配置 MLX CLI 包装器。用户手动打开 App，添加共享模型目录、加载模型并开启 API。Benchmark 使用 App 显示的地址，默认示例为 `http://127.0.0.1:11234/v1`，不依赖 llama-swap。

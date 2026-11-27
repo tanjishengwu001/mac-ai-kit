@@ -143,6 +143,8 @@ Mac AI Kit · 本地 AI 创作工坊
                       logs --service audio --follow（Ctrl+C 仅退出查看）
   benchmark           Llama benchmark（通用接口测试）
   mlx-video-queue     MiniMax H3 常驻视频队列（start / stop / status / run）
+  weetodd            WeeToddCLI 安装与配置（preview / install / doctor / cli）
+                     cli -- 原生参数；潜空间放大说明见 docs/WEETODD_CLI.md
   mlx-benchmark       MLX-Serve 长上下文 benchmark（0 / 50K / 100K / 200K）
   aiperf-benchmark    AIPerf 多并发压力测试（延迟、吞吐与错误率）
   remote              配置 Remotion Remote（仅写配置，不启动服务）
@@ -261,6 +263,9 @@ run_task() {
       model_directory_for_args "$@" || return $?
       find_python || { say '未找到 Python 3.10+，无法检查模型；不会自动安装。' >&2; return 1; }
       "$PYTHON" "$SCRIPTS/model_inventory.py" --models-dir "$MODEL_DIR" "$@"; return $? ;;
+    weetodd)
+      find_python || { say 'WeeTodd 安装入口需要 Python 3.10+；请先准备基础环境。' >&2; return 1; }
+      "$PYTHON" "$SCRIPTS/weetodd_setup.py" "$@"; return $? ;;
     mlx-video-queue) mlx_video_queue "$@"; return $? ;;
     services) services "$@"; return $? ;;
     benchmark) benchmark "$@"; return $? ;;
@@ -271,6 +276,7 @@ run_task() {
     check-tools) check_tools "$@"; return $? ;; -h|--help) usage; return 0 ;; script-help)
     [ "$#" -eq 1 ] || { usage >&2; return 2; }
     case "$1" in
+      weetodd) run_task weetodd --help ;;
       benchmark) benchmark --help ;;
       mlx-benchmark) mlx_benchmark --help ;;
       aiperf-benchmark) aiperf_benchmark --help ;;
@@ -398,12 +404,14 @@ install_menu() {
     UI_BACK_LABEL=返回
     ui_select '安装运行工具' \
       '准备基础工具' '检查并安装 Python、uv 等运行环境' \
-      '安装推理与生成引擎' '选择需要的工具，确认后才开始安装'
+      '安装推理与生成引擎' '选择需要的工具，确认后才开始安装' \
+      '安装 WeeToddCLI' '构建完整 Studio 和原生 worker；不下载模型、不生成视频'
     case "$UI_CHOICE" in
       0|q) return "$code" ;;
       h) usage; ui_pause; continue ;;
       1) run_task env --install ;;
       2) run_task capabilities --install --models-dir "$MODEL_DIR" ;;
+      3) run_task weetodd install ;;
       *) say '请选择菜单中的编号。'; ui_pause; continue ;;
     esac
     code=$?; menu_result "$code"

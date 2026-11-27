@@ -44,7 +44,7 @@ bash start.sh weetodd cli -- models --help
 
 `config.json` 只记录 App、FFmpeg/FFprobe、worker 等工具路径，**不是 Studio settings，也不是模型 recipe**。安装器不写 Studio settings、不配置模型，更不会替用户登记模型位置。不要把模型路径追加为未经实现的 `--model`、`--config` 参数。
 
-安装完整性验证包括 `codesign` 校验、H3 manifest 中记录的 SHA-256、`LTXNative/mlx.metallib` 存在性及原生 CLI `models --help`。`doctor` 只做安装完整性和媒体工具检查；这些不是读取模型后的 worker preflight，更不是渲染测试。本文没有自行执行上述安装验证，实际安装是否成功以工具输出为准。
+安装完整性验证包括 `codesign` 校验、H3 manifest 中记录的 SHA-256、`LTXNative/mlx.metallib` 存在性及原生 CLI `models --help`。`doctor` 只做安装完整性和媒体工具检查；这些不是读取模型后的 worker preflight，更不是渲染测试。本机安装与 CLI 实测记录见 [安装验证](WEETODD_VALIDATION.md)，其他机器仍以实际工具输出为准。
 
 构建需要 Apple Silicon 和**完整 Xcode 26+**；只有 Command Line Tools 不足。上游要求 macOS 26+ SDK，并在构建时探测 Metal 与 SwiftUI 宏。先打开 Xcode 完成许可及组件安装；缺少 Metal 时按 Xcode Settings → Components 安装 Metal Toolchain。`--xcode` 接受 `.app` 或 `Contents/Developer`，上游不会因此修改系统全局 `xcode-select`。复用 App 不等于验证其模型运行能力。
 
@@ -281,4 +281,4 @@ ffprobe -v error \
 - `integrations/weetodd-mlx/Sources/H3MLX/H3TwoStageRecipe.swift`、`H3TwoStagePlan.swift`（后者同目录）：worker 两阶段契约与强度语义。
 - `scripts/build_studio_app.py`、`scripts/build_h3_mlx_worker.py`、`integrations/weetodd-inference/Sources/InferenceContracts/NativeMLXMetalLibrary.swift`：打包与共享 Metal 资源查找。
 
-本文只核对源码和文档；未执行任何模型下载、组件创建/预检或生成，也未触碰外置模型卷。
+使用流程按源码和文档核对；安装工具已单独实测，未执行任何模型下载、组件创建/预检或生成，也未触碰外置模型卷。

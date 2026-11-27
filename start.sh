@@ -137,8 +137,8 @@ Mac AI Kit · 本地 AI 创作工坊
   check               检查基础环境，不安装
   check-tools         查看工具安装、配置及进程状态（只读）
   api [--directory 目录] 更新 API.md 文档，默认使用已保存的模型目录
-  services            全部 / 仅音频 / 仅制图启动、状态与日志；llama-swap 可选
-                      start / stop / status [--service all|sd-qwen|audio]
+  services            全部 / 仅音频 / 仅制图 / MLX 视频队列启停、状态与日志
+                      start / stop / status [--service all|sd-qwen|audio|mlx-video-queue]
                       status --json（只读快照，unknown 不是空闲）
                       logs --service audio --follow（Ctrl+C 仅退出查看）
   benchmark           Llama benchmark（通用接口测试）
@@ -485,7 +485,7 @@ menu() {
       '配置 Remotion 远程渲染' '在你指定的仓库目录中配置脚本和服务' \
       '环境诊断与 API 说明' '检查安装状态，整理本机接口说明' \
       'Benchmark' '测试已有接口，保存测速报告' \
-      '服务管理' '独立服务一键启停、状态与日志；llama-swap 可选'
+      '服务管理' '独立服务及 MLX 视频队列（11235）启停、状态与日志'
     case "$UI_CHOICE" in
       0|q) return "$code" ;;
       h) usage; ui_pause; continue ;;

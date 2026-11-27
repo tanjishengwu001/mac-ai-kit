@@ -27,6 +27,7 @@ from service_manager import ServiceError, atomic_write, checked_path, port_numbe
 from agent_workflow import append_workflow
 
 ROOT = Path(__file__).resolve().parents[1]
+QUEUE_SERVICE = 'mlx-video-queue'
 SPECS = {
     'sd-qwen': dict(title='SD.cpp', component='sd.cpp', version='managed', binary='sd-server', port=12345,
                     model_ids=('qwen21-turbo', 'krea2-turbo')),
@@ -523,10 +524,21 @@ class NativeManager:
             self._inventory_added = True
 
     def start(self, selection='all'):
+        if selection == QUEUE_SERVICE:
+            return self.queue_action('start')
         if selection != 'all' and selection not in SPECS:
             raise ServiceError('未知服务')
         try:
+            queue_error = None
+            if selection == 'all':
+                try:
+                    self.queue_action('start')
+                except (OSError, ValueError, subprocess.SubprocessError) as error:
+                    queue_error = error
+                    print_safe(str(error))
             self._start(selection)
+            if queue_error:
+                raise ServiceError(str(queue_error))
         except KeyboardInterrupt:
             print_safe('已退出等待，已提交的服务保持运行；可在服务状态中查看。')
             raise
@@ -534,6 +546,24 @@ class NativeManager:
             if sys.platform == 'darwin':
                 self.status(selection)
                 self.write_api(selection)
+
+    def queue_action(self, action, json_output=False):
+        """复用原队列入口、固定 launchd 标签及默认状态目录，不另建实例。"""
+        command = [sys.executable, str(ROOT / 'scripts/mlx_video_queue.py'), action]
+        if json_output:
+            command.append('--json')
+        result = subprocess.run(command, capture_output=True, text=True, timeout=60)
+        if json_output:
+            row = json.loads(result.stdout)
+            if not isinstance(row, dict) or row.get('service') != QUEUE_SERVICE:
+                raise ServiceError('队列状态响应结构无效')
+            if result.returncode and 'error' not in row:
+                row['error'] = '队列状态查询失败'
+            return row
+        if result.stdout:
+            print_safe(result.stdout.rstrip())
+        if result.returncode:
+            raise ServiceError('MLX-Serve 视频队列：' + (clean(result.stderr).strip() or '操作未完成'))
 
     def _start(self, selection='all'):
         if sys.platform != 'darwin':
@@ -626,9 +656,17 @@ class NativeManager:
                 raise ServiceError('部分服务尚未就绪：' + '、'.join(SPECS[sid]['title'] for sid in failures) + '；其他服务保持当前状态')
 
     def stop(self, selection='all'):
+        if selection == QUEUE_SERVICE:
+            return self.queue_action('stop')
         if sys.platform != 'darwin':
             raise ServiceError('启停仅支持 macOS；没有停止进程')
         failures = []
+        if selection == 'all':
+            try:
+                self.queue_action('stop')
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                failures.append(QUEUE_SERVICE)
+                print_safe(str(error))
         with self.lock():
             for sid in list(SPECS) if selection == 'all' else [selection]:
                 title = SPECS[sid]['title']
@@ -665,13 +703,14 @@ class NativeManager:
                     failures.append(sid)
                     print_safe(title + '：' + str(error))
         if failures:
-            raise ServiceError('未完全停止：' + '、'.join(SPECS[sid]['title'] for sid in failures))
+            raise ServiceError('未完全停止：' + '、'.join(SPECS[sid]['title'] if sid in SPECS else 'MLX-Serve 视频队列' for sid in failures))
 
     def status_json(self, selection='all'):
         """机器可读的只读快照；健康或权重驻留从不推断为空闲。"""
         result = dict(schema_version=1, toolkit_root=str(ROOT), root=str(self.root),
                       models_dir=str(self.models), supported=sys.platform == 'darwin', services=[])
-        for sid in list(SPECS) if selection == 'all' else [selection]:
+        selected = list(SPECS) if selection == 'all' else ([] if selection == QUEUE_SERVICE else [selection])
+        for sid in selected:
             row = dict(service=sid, title=SPECS[sid]['title'], configured=False,
                        loaded=None, owned=None, pid=None, stopping=None,
                        api_healthy=None, model_residency='unknown', workload='unknown',
@@ -704,9 +743,27 @@ class NativeManager:
                 # empty / ready / healthy 都不是任务空闲证明，也不授权自动 stop。
             except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
                 row['error'] = clean(error)
+        if selection in ('all', QUEUE_SERVICE):
+            try:
+                row = self.queue_action('status', json_output=True)
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                row = dict(service=QUEUE_SERVICE, title='MLX-Serve 视频队列', loaded=None,
+                           owned=None, pid=None, api_healthy=None, model_residency='unknown',
+                           workload='unknown', stop_safety='unknown', atomic_shutdown_barrier=False,
+                           error=clean(error))
+            result['services'].append(row)
         return result
 
     def status(self, selection='all'):
+        if selection == QUEUE_SERVICE:
+            return self.queue_action('status')
+        queue_error = None
+        if selection == 'all':
+            try:
+                self.queue_action('status')
+            except (OSError, ValueError, subprocess.SubprocessError) as error:
+                queue_error = error
+                print_safe(str(error))
         print_safe('模型目录：' + str(self.models))
         addresses = network_addresses()
         for sid in list(SPECS) if selection == 'all' else [selection]:
@@ -751,6 +808,8 @@ class NativeManager:
                 except (OSError, ValueError, KeyError) as error:
                     print_safe('  原因：' + str(error))
             print_safe('  日志：' + str(self.paths(sid)[0]))
+        if queue_error:
+            raise ServiceError(str(queue_error))
 
     def write_api(self, selection='all'):
         if not self.models.is_dir():
@@ -851,9 +910,10 @@ class NativeManager:
         self._inventory_added = False
 
     def logs(self, sid, follow=False, lines=60):
-        base = self.paths(sid)[0]
+        base = (Path.home() / 'Library/Application Support/Mac AI Kit/mlx-video-queue'
+                if sid == QUEUE_SERVICE else self.paths(sid)[0])
         handles = {}
-        if self.base.is_symlink() or base.is_symlink():
+        if base.is_symlink() or (base.parent if sid == QUEUE_SERVICE else self.base).is_symlink():
             raise ServiceError('日志目录为符号链接，未读取')
         try:
             for name in ('stdout.log', 'stderr.log'):
@@ -888,13 +948,15 @@ class NativeManager:
 def menu(manager):
     from service_manager import menu as swap_menu, Manager as SwapManager, pause_menu
     script = Path(__file__).with_name('terminal_ui.sh')
-    options = [('启动全部', '启动 SD.cpp / audio.cpp；默认加载 Qwen 图像模型'),
+    options = [('启动全部', '启动 SD.cpp / audio.cpp / MLX 视频队列（11235）；不启动 MLX App'),
                ('仅启动音频', '只启动 audio.cpp（转写／YuE2），只预检音频预算'),
                ('仅启动制图', '只启动 SD.cpp；默认加载完整 Qwen，不关闭音频'),
-               ('停止全部', '仅关闭本工具包启动的原生服务，正在进行的任务会中断'),
+               ('停止全部', '关闭受管原生服务及视频队列，正在进行的任务会中断'),
                ('查看状态', '查看地址、进程、API 健康及日志位置'),
                ('查看日志', '选择服务，Ctrl+C 仅退出日志查看'),
-               ('可选 llama-swap', '原有独立配置与启停；不参与上面的一键操作')]
+               ('可选 llama-swap', '原有独立配置与启停；不参与上面的一键操作'),
+               ('仅启动 MLX 视频队列', '11235 包装层；不加载模型，不启停 11234 MLX-Serve'),
+               ('查看 MLX 视频队列状态', '单独查看队列进程、API 健康及日志位置')]
     def select(title, items):
         rfd, wfd = os.pipe()
         try:
@@ -918,12 +980,16 @@ def menu(manager):
             elif choice == '4': manager.stop()
             elif choice in ('5', 'h'): manager.status()
             elif choice == '6':
-                key = select('查看日志', [(SPECS['sd-qwen']['title'], '查看图像服务日志'), (SPECS['audio']['title'], '查看音频服务日志')])
+                key = select('查看日志', [(SPECS['sd-qwen']['title'], '查看图像服务日志'), (SPECS['audio']['title'], '查看音频服务日志'), ('MLX 视频队列', '查看 11235 队列日志')])
                 if key in ('', '0', 'q'): continue
                 if key in ('1', '2'): manager.logs('sd-qwen' if key == '1' else 'audio', follow=True)
+                elif key == '3': manager.logs(QUEUE_SERVICE, follow=True)
             elif choice == '7':
                 swap_menu(SwapManager(manager.root, manager.models))
                 continue
+            elif choice == '8': manager.start(QUEUE_SERVICE)
+            elif choice == '9': manager.status(QUEUE_SERVICE)
+
         except (OSError, ValueError, subprocess.SubprocessError) as e:
             print_safe('未完成：' + str(e))
         pause_menu()
@@ -934,7 +1000,7 @@ def main(argv=None):
     parser.add_argument('--root', default=str(Path.home() / 'AI'), help='程序与服务根目录（不是模型目录）')
     parser.add_argument('--models-dir', default=str(Path.home() / 'AI/models'), help='已有模型根目录')
     parser.add_argument('action', nargs='?', choices=['menu','status','start','stop','logs'])
-    parser.add_argument('--service', choices=['all', *SPECS], default='all', help='选择原生服务')
+    parser.add_argument('--service', choices=['all', *SPECS, QUEUE_SERVICE], default='all', help='选择原生服务或 MLX 视频队列')
     parser.add_argument('--follow', action='store_true', help='持续显示新增日志，Ctrl+C 仅退出查看')
     parser.add_argument('--json', action='store_true', help='仅 status：输出只读 JSON；健康或模型驻留不等于任务空闲')
     args = parser.parse_args(argv)
@@ -952,7 +1018,7 @@ def main(argv=None):
             manager.status(args.service)
         elif action == 'logs':
             if args.service == 'all':
-                raise ServiceError('日志请指定 --service sd-qwen 或 --service audio')
+                raise ServiceError('日志请指定 --service sd-qwen、audio 或 mlx-video-queue')
             manager.logs(args.service, args.follow)
         else: getattr(manager, action)(args.service)
         return 0

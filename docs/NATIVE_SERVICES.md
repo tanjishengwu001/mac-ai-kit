@@ -1,6 +1,6 @@
 # 独立服务管理
 
-主菜单第 6 项「服务管理」提供“启动全部”“仅启动音频”“仅启动制图”、关闭、状态和日志。不需要 llama-swap，也不会为了启动服务安装程序或下载权重。底层使用 macOS 当前用户的 LaunchAgent，操作方式类似 `systemctl`，但不是 Linux systemd。
+主菜单第 6 项「服务管理」提供“启动全部”“仅启动音频”“仅启动制图”，以及独立的“仅启动 MLX 视频队列”“查看 MLX 视频队列状态”。全部启动、停止、状态和日志选择均包含 11235 视频队列，单独停止队列可用下方命令。不需要 llama-swap，也不会为了启动服务安装程序或下载权重。底层使用 macOS 当前用户的 LaunchAgent，操作方式类似 `systemctl`，但不是 Linux systemd。
 
 ## 常用命令
 
@@ -28,9 +28,26 @@ bash start.sh services start --service sd-qwen
 # 也可以单独停止或查看状态
 bash start.sh services stop --service audio
 bash start.sh services status --service audio
+
+# 独立管理 11235 视频队列，不启停 11234 MLX-Serve
+bash start.sh services start --service mlx-video-queue
+bash start.sh services status --service mlx-video-queue
+bash start.sh services status --service mlx-video-queue --json
+bash start.sh services stop --service mlx-video-queue
+bash start.sh services logs --service mlx-video-queue --follow
 ```
 
-启停和状态的 `--service` 可选 `all`（默认）、`sd-qwen` 或 `audio`；日志必须明确选择 `sd-qwen` 或 `audio`。直接脚本入口支持 `--root` 指定工具根（默认 `~/AI`），例如 `python3 scripts/native_services.py --root ~/AI --models-dir /你的模型目录 status`。交互菜单需要终端；自动化调用请明确指定 `status`、`start`、`stop` 或 `logs`。
+启停和状态的 `--service` 可选 `all`（默认）、`sd-qwen`、`audio` 或 `mlx-video-queue`；日志必须明确选择单个服务。直接脚本入口支持 `--root` 指定原生工具根（默认 `~/AI`），例如 `python3 scripts/native_services.py --root ~/AI --models-dir /你的模型目录 status`。交互菜单需要终端；自动化调用请明确指定 `status`、`start`、`stop` 或 `logs`。
+
+## MLX 视频队列（11235）
+
+队列复用原有 `mlx-video-queue` 命令、`org.mac-ai-kit.mlx-video-queue` launchd 标签及 `~/Library/Application Support/Mac AI Kit/mlx-video-queue` 状态目录，不在 `~/AI/services` 下创建第二套实例。菜单中的单独启动只启动包装层，不扫描权重、不预留 H3 模型内存、不写模型目录的 API.md，也不启停或加载 MLX-Serve 本体。需要已安装的 FFmpeg；不会自动安装。
+
+“启动全部”先尝试队列，再按原有内存预检启动 SD.cpp / audio.cpp；队列失败仍尝试其他服务，并返回失败状态。图像/音频预算不足时，已启动的队列不会被回滚或停止。队列启动会继续已有等待任务，因此启动全部不是媒体任务的资源协调器；有待处理视频时，请遵守后文的资源协调规则，不同时提交图像/音频任务。
+
+已有队列被重复启动时保留现有配置，不重启。菜单使用默认状态目录和启动参数；自定义输出目录、端口、FFmpeg 或上游认证文件仍通过 `bash start.sh mlx-video-queue start ...` 设置，停止后再次从菜单启动会使用默认参数。使用自定义 `--state` 的实例请继续用原命令和同一 `--state` 管理，菜单不会接管其他状态目录。
+
+状态区分 launchd 注册、PID 和 `/healthz` 的工作线程健康，读取保存配置中的实际端口；不把队列健康当作上游模型就绪或任务空闲。JSON 的队列 `workload`、`stop_safety` 保持 `unknown`，没有原子停机屏障。“停止全部”现在也会停止队列，运行中任务可能中断；等待任务仍按原队列恢复规则保留。队列的停止沿用原入口，不承诺原生 SD/audio 的 35 秒退出追踪。详情见 [视频队列](MLX_VIDEO_QUEUE.md)。
 
 ## 单独启动与内存预检
 
@@ -76,6 +93,7 @@ bash start.sh services logs --service sd-qwen --follow
 | --- | --- | --- | --- |
 | `sd-qwen` | SD.cpp / Qwen Image 2.1 Turbo 与 Krea 2 Turbo | `127.0.0.1:12345` | 首次启动默认加载 Qwen；WebUI / API 切换 |
 | `audio` | audio.cpp / ASR 与 Yue2 | `127.0.0.1:18080` | 共用一个服务，`lazy_load=true`，`max_loaded_models=1`，闲置 5 分钟卸载 |
+| `mlx-video-queue` | MLX-Serve 视频排队包装层 | `127.0.0.1:11235` | 不加载权重；转发到已有的 `127.0.0.1:11234` |
 
 - 「全部启动」是启动全部符合条件的受管服务，不是把目录里所有模型都装进内存。程序版本、所需文件和模型组合必须通过检查；未安装、不完整、不支持或未验证的项目会跳过并报告原因，不自动补装或下载。
 - audio 的健康接口可在权重尚未加载时就绪。ASR 与 Yue2 由首次实际请求按需加载；最大驻留模型数为 1 不等于所有请求都能安全并行。
@@ -85,7 +103,7 @@ bash start.sh services logs --service sd-qwen --follow
 - 状态应分别理解进程是否运行、HTTP 接口是否就绪、权重是否已加载。进程存在或健康检查成功不等于模型已经加载，也不等于实际生成已通过验证。
 - 图像服务只注册完整的本地 Qwen / Krea 组件目录，不复制权重、不建链接、不自动下载。
 - MLX-Serve 仍是手动使用桌面 App：打开 App、加载模型、开启 API；这里不调用 MLX CLI，也不托管 App。
-- H3 / Music3 仍为外部流程，不纳入这里的启停与日志管理。
+- H3 / Music3 模型加载仍为外部流程；这里只管理视频队列包装层，不管理 MLX App 或模型生命周期。
 - llama-swap 是独立的可选入口，其启动、停止与日志不包含在本页的 `all` 中，见 [llama-swap（可选）](services.md)。
 
 ## 模型目录、退出与安全边界
